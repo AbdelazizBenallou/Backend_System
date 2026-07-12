@@ -1,0 +1,57 @@
+@startuml
+actor User as user
+
+participant "Server" as server
+participant "Users" as users
+participant "Role_User" as role_user
+participant "Role" as role
+participant "Refresh_Token" as refresh_token
+
+user -> server: POST /auth/refresh-token (refreshToken)
+
+server -> server: validateInput(refreshToken)
+alt Input Not Valid
+    server --> user: 400 Bad Request
+else Input Valid
+
+    server -> server: jwtVerify(refreshToken)
+    alt JWT Expired
+        server --> user: 403 Refresh token expired
+    else JWT Invalid Signature
+        server --> user: 403 Invalid refresh token
+    else JWT Valid
+        server --> server: payload = { userId, email }
+
+        server -> users: findById(userId)
+        alt User Not Found
+            users --> server: null
+            server --> user: 401 User not found
+        else User Found
+            users --> server: user(id, status)
+            server -> server: checkAccountStatus(status)
+            alt Not Active
+                server --> user: 403 Account not active
+            else Active
+
+                server -> refresh_token: findActiveByUser(user_id)
+                refresh_token --> server: [{ id, token_hash }, ...]
+
+                server -> server: argon2FindMatch(raw, stored_hashes)
+                alt No Match
+                    server --> user: 403 Invalid refresh token
+                else Match Found
+
+                    server -> role_user: getRoles(user_id)
+                    role_user --> server: role_ids
+
+                    server -> role: getRoleDetails(role_ids)
+                    role --> server: roles
+
+                    server -> server: signNewAccessToken(user + roles)
+                    server --> user: 200 OK + new accessToken
+                end
+            end
+        end
+    end
+end
+@enduml

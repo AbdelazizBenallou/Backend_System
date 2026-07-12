@@ -1,0 +1,154 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  active
+  inactive
+  locked
+  suspended
+}
+
+model User {
+  user_id       Int           @id @default(autoincrement())
+  email         String        @unique
+  password_hash String
+  status        UserStatus    @default(active)
+  created_at    DateTime      @default(now()) @db.Timestamp(6)
+  updated_at    DateTime      @updatedAt @db.Timestamp(6)
+
+  profile        Profile?
+  refresh_tokens RefreshToken[]
+  user_role      UserRole[]
+  login_history  LoginHistory[]
+  files          File[]
+
+  @@index([email], map: "idx_users_email")
+}
+
+model Profile {
+  user_id           Int              @id
+  first_name        String?
+  last_name         String?
+  date_birth        DateTime?        @db.Date
+  address           String?
+  avatar_file_id    Int?
+  level_id          Int?
+  specialization_id Int?
+
+  user            User            @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  avatar          File?           @relation("AvatarFile", fields: [avatar_file_id], references: [file_id])
+  level           Level?          @relation(fields: [level_id], references: [level_id])
+  specialization  Specialization? @relation(fields: [specialization_id], references: [specialization_id])
+}
+
+model Role {
+  role_id         Int               @id @default(autoincrement())
+  name            String            @unique
+  role_permission RolePermission[]
+  user_role       UserRole[]
+}
+
+model Permission {
+  permission_id   Int               @id @default(autoincrement())
+  name            String            @unique
+  role_permission RolePermission[]
+}
+
+model UserRole {
+  user_id Int
+  role_id Int
+
+  user User @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  role Role @relation(fields: [role_id], references: [role_id], onDelete: Cascade)
+
+  @@id([user_id, role_id])
+}
+
+model RolePermission {
+  role_id       Int
+  permission_id Int
+
+  role       Role       @relation(fields: [role_id], references: [role_id], onDelete: Cascade)
+  permission Permission @relation(fields: [permission_id], references: [permission_id], onDelete: Cascade)
+
+  @@id([role_id, permission_id])
+}
+
+model RefreshToken {
+  refresh_token_id Int      @id @default(autoincrement())
+  user_id          Int
+  token            String   @unique
+  expires_at       DateTime @db.Timestamp(6)
+  created_at       DateTime @default(now()) @db.Timestamp(6)
+  revoked          Boolean  @default(false)
+
+  user User @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@index([user_id], map: "idx_refresh_tokens_user")
+}
+
+model LoginHistory {
+  login_history_id Int      @id @default(autoincrement())
+  user_id          Int
+  login_at         DateTime @default(now()) @db.Timestamp(6)
+  logout_at        DateTime? @db.Timestamp(6)
+  ip_address       String?
+  user_agent       String?
+
+  user User @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@index([user_id], map: "idx_login_history_user")
+}
+
+model File {
+  file_id       Int      @id @default(autoincrement())
+  user_id       Int
+  original_name String
+  stored_name   String   @unique
+  mime_type     String
+  size          Int
+  category      String   @default("other")
+  created_at    DateTime @default(now()) @db.Timestamp(6)
+
+  user         User      @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  avatar_profi Profile[] @relation("AvatarFile")
+}
+
+model DegreeLevel {
+  degree_level_id Int     @id @default(autoincrement())
+  name            String  @unique
+  level           Level[]
+}
+
+model Level {
+  level_id             Int                    @id @default(autoincrement())
+  name                 String
+  created_at           DateTime               @default(now()) @db.Timestamp(6)
+  degree_level_id      Int
+  degree_level         DegreeLevel            @relation(fields: [degree_level_id], references: [degree_level_id], onDelete: Cascade)
+  level_specialization LevelSpecialization[]
+  profile              Profile[]
+}
+
+model Specialization {
+  specialization_id    Int                    @id @default(autoincrement())
+  name                 String                 @unique
+  level_specialization LevelSpecialization[]
+  profile              Profile[]
+}
+
+model LevelSpecialization {
+  level_id          Int
+  specialization_id Int
+
+  level          Level          @relation(fields: [level_id], references: [level_id], onDelete: Cascade)
+  specialization Specialization @relation(fields: [specialization_id], references: [specialization_id], onDelete: Cascade)
+
+  @@id([level_id, specialization_id])
+}

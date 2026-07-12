@@ -1,0 +1,31 @@
+@startuml
+actor User as user
+
+participant "Server" as server
+participant "Refresh_Token" as refresh_token
+
+user -> server: POST /auth/logout (refreshToken)
+
+alt No Token Provided
+    server --> user: 200 OK + clear cookies
+else Token Provided
+
+    server -> server: jwtVerify(refreshToken)
+    alt JWT Invalid
+        server --> user: 403 Invalid refresh token
+    else JWT Valid
+        server --> server: payload = { userId }
+
+        server -> refresh_token: findActiveByUser(userId)
+        refresh_token --> server: [{ id, token_hash }, ...]
+
+        server -> server: argon2FindMatch(raw, stored_hashes)
+        alt Match Found
+            server -> refresh_token: updateRevoked(match_id, true)
+            refresh_token --> server: Done
+        end
+
+        server -> user: 200 OK + clear cookies
+    end
+end
+@enduml

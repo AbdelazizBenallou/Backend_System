@@ -1,0 +1,60 @@
+@startuml
+actor User as user
+
+participant "Server" as server
+participant "Users" as users
+participant "Profile" as profile
+participant "Role_User" as role_user
+participant "Refresh_Token" as refresh_token
+participant "login_history" as login_history
+participant "Redis_Cache" as redis
+
+user -> server: DELETE /v1/users/205\nAuthorization: Bearer <token>
+
+server -> server: extractToken + jwtVerify
+alt Invalid Token
+    server --> user: 401
+else Valid
+
+    server -> users: findById(token.userId)
+    users --> server: { status }
+    alt Not Active
+        server --> user: 403
+    else Active
+
+        server -> redis: checkPermission("manage_users")
+        alt Forbidden
+            server --> user: 403
+        else Allowed
+
+            server -> server: validateIdParam(205)
+            alt Invalid ID
+                server --> user: 400 Invalid user ID
+            else Valid ID
+
+                server -> users: findById(205)
+                alt Not Found
+                    users --> server: null
+                    server --> user: 404 User not found
+                else Found
+
+                    server -> users: delete(205)
+                    note right #LightCoral
+                      Cascade deletes:
+                      • Profile (FK)
+                      • Role_User (FK)
+                      • Refresh_Token (FK)
+                      • login_history (FK)
+                    end note
+                    users --> server: Done
+
+                    server -> redis: del(permissions:user:{205})
+                    redis --> server: Done
+
+                    server --> user: 200 OK + { message: "User deleted" }
+                end
+            end
+        end
+    end
+end
+@enduml

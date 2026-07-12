@@ -1,0 +1,32 @@
+@startuml
+title POST /v1/auth/register
+
+actor Client as C
+participant "Rate Limiter" as RL
+participant "Zod Validate" as ZV
+participant "Auth Controller" as AC
+participant "Auth Service" as AS
+database "Prisma DB" as DB
+participant "Argon2" as A2
+participant "JWT Utils" as JWT
+
+C -> RL: POST /v1/auth/register\n{ email, password, first_name, last_name }
+RL -> ZV: IP check (3/300s)
+ZV -> AC: registerSchema validated
+AC -> AS: register(data, ip, userAgent)
+AS -> DB: findUnique({ email })
+alt email exists
+  AS --> AC: throw AppError(409)
+  AC --> C: 409 Email already exists
+end
+AS -> A2: hash(password)
+A2 --> AS: password_hash
+AS -> DB: $transaction[ create user,\ncreate profile,\ncreate userRole(Customer) ]
+DB --> AS: newUser
+AS -> JWT: signAccessToken({ userId, email, roles:["Customer"] })
+AS -> JWT: signRefreshToken({ userId, email })
+AS -> DB: $transaction[ create refreshToken,\ncreate loginHistory ]
+DB --> AS: done
+AS --> AC: { accessToken, refreshToken, user }
+AC -> C: Set httpOnly cookies\n+ JSON response 201
+@enduml

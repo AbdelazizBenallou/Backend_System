@@ -1,0 +1,64 @@
+@startuml
+actor User as user
+
+participant "Server" as server
+participant "Users" as users
+participant "Profile" as profile
+participant "Role_User" as role_user
+participant "Role" as role
+participant "Role_Permission" as role_permission
+participant "Permissions" as permissions
+participant "Refresh_Token" as refresh_token
+participant "login_history" as login_history
+
+user -> server: POST /auth/login (email, password)
+
+server -> server: validateInput(email, password)
+alt Input Not Valid
+    server --> user: 400 Bad Request
+else Input Valid
+
+    server -> users: findByEmail(email)
+    alt Email Not Found
+        users --> server: null
+        server -> server: hashCompare(password, fake_hash)
+        server --> user: 401 Unauthorized\nInvalid credentials
+    else Email Found
+        users --> server: user(id, password_hash, status)
+
+        server -> server: checkAccountStatus(status)
+        alt Account Not Active
+            server --> user: 403 Forbidden
+        else Account OK
+
+            server -> server: hashCompare(password, password_hash)
+            alt Password Invalid
+                server --> user: 401 Unauthorized\nInvalid credentials
+            else Password Valid
+
+                server -> role_user: getRoles(user_id)
+                role_user --> server: role_ids
+
+                server -> role: getRoleDetails(role_ids)
+                role --> server: roles
+
+                server -> role_permission: getPermissions(role_ids)
+                role_permission --> server: permission_ids
+
+                server -> permissions: getPermissionDetails(permission_ids)
+                permissions --> server: permissions_list
+
+                server -> server: generateTokens(user + roles)
+
+                server -> refresh_token: insert(user_id, argon2_hash, expires_at)
+                refresh_token --> server: Done
+
+                server -> login_history: insert(user_id, ip, device)
+                login_history --> server: Done
+
+                server -> user: 200 OK + tokens
+            end
+        end
+    end
+end
+@enduml

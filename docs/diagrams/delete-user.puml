@@ -1,0 +1,35 @@
+@startuml
+title DELETE /v1/users/:id
+
+actor Client as C
+participant "Verify Access\nToken MW" as VAT
+participant "Check Permission\nMW" as CP
+participant "Rate Limiter" as RL
+participant "Users Controller" as UC
+participant "Users Service" as US
+participant "JWT Utils" as JWT
+database "Prisma DB" as DB
+participant "Redis Cache" as RC
+
+C -> VAT: DELETE /v1/users/205\nAuthorization: Bearer <token>
+VAT -> JWT: verifyAccessToken
+JWT --> VAT: decoded
+VAT -> DB: check user status
+VAT -> CP: req.user
+CP -> RC: check permission "manage_users"
+CP -> RL
+RL -> UC: IP check (5/60s)
+UC -> UC: parse param id
+alt invalid id
+  UC --> C: 400
+end
+UC -> US: remove(205)
+US -> DB: findUnique({ user_id })
+alt not found
+  US --> UC: throw AppError(404)
+end
+US -> DB: delete({ user_id })
+DB --> US: done
+US --> UC: void
+UC --> C: JSON 200 { message: "User deleted" }
+@enduml

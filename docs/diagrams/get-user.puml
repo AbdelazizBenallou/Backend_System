@@ -1,0 +1,34 @@
+@startuml
+title GET /v1/users/:id
+
+actor Client as C
+participant "Verify Access\nToken MW" as VAT
+participant "Check Permission\nMW" as CP
+participant "Rate Limiter" as RL
+participant "Users Controller" as UC
+participant "Users Service" as US
+participant "JWT Utils" as JWT
+database "Prisma DB" as DB
+participant "Redis Cache" as RC
+
+C -> VAT: GET /v1/users/205\nAuthorization: Bearer <token>
+VAT -> JWT: verifyAccessToken(token)
+JWT --> VAT: { userId, email, roles }
+VAT -> DB: check user status
+VAT -> CP: req.user = decoded
+CP -> RC: check permission "manage_users"
+CP -> RL
+RL -> UC: IP check (30/60s)
+UC -> UC: parse param id
+alt invalid id (NaN)
+  UC --> C: 400 Invalid user ID
+end
+UC -> US: getById(205)
+US -> DB: findUnique({ user_id }, include profile, roles)
+alt not found
+  US --> UC: throw AppError(404)
+end
+DB --> US: user
+US --> UC: formatted user
+UC --> C: JSON 200 { user }
+@enduml

@@ -1,0 +1,28 @@
+@startuml
+title POST /v1/auth/logout
+
+actor Client as C
+participant "Auth Controller" as AC
+participant "JWT Utils" as JWT
+participant "Argon2" as A2
+database "Prisma DB" as DB
+
+C -> AC: POST /v1/auth/logout\n{ refreshToken }
+AC -> JWT: verifyRefreshToken(refreshToken)
+alt invalid token
+  AC --> C: 403
+end
+JWT --> AC: { userId }
+AC -> DB: findMany({ user_id, revoked:false, expires_at > now })
+DB --> AC: stored tokens
+loop each stored token
+  AC -> A2: verifyToken(storedHash, rawToken)
+  A2 --> AC: true/false
+  alt match found
+    AC -> DB: update({ revoked:true })
+    DB --> AC: done
+    break
+  end
+end
+AC -> C: clearCookie("accessToken")\nclearCookie("refreshToken")\nJSON 200
+@enduml

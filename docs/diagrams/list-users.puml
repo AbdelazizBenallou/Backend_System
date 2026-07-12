@@ -1,0 +1,38 @@
+@startuml
+title GET /v1/users
+
+actor Client as C
+participant "Verify Access\nToken MW" as VAT
+participant "Check Permission\nMW" as CP
+participant "Rate Limiter" as RL
+participant "Zod Validate\nQuery" as ZVQ
+participant "Users Controller" as UC
+participant "Users Service" as US
+participant "JWT Utils" as JWT
+database "Prisma DB" as DB
+participant "Redis Cache" as RC
+
+C -> VAT: GET /v1/users\nAuthorization: Bearer <token>
+VAT -> JWT: verifyAccessToken(token)
+JWT --> VAT: { userId, email, roles }
+VAT -> DB: findUnique({ user_id })
+DB --> VAT: { status }
+alt user not active
+  VAT --> C: 403 Account is not active
+end
+VAT -> CP: req.user = decoded
+CP -> RC: get(permissions:user:{userId})
+alt cache miss
+  CP -> DB: findMany userRole → role → permission
+  DB --> CP: permissions list
+  CP -> RC: set(cacheKey, permissions, 60s)
+end
+CP -> RL: check permission "manage_users"
+RL -> ZVQ: IP check (30/60s)
+ZVQ -> UC: query validated\n{ limit, cursor }
+UC -> US: getAll(query)
+US -> DB: findMany({ take, cursor, skip,\ninclude profile, roles })
+DB --> US: users
+US --> UC: { data, nextCursor, hasMore }
+UC --> C: JSON 200 { data, nextCursor, hasMore }
+@enduml

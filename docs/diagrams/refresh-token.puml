@@ -1,0 +1,41 @@
+@startuml
+title POST /v1/auth/refresh-token
+
+actor Client as C
+participant "Rate Limiter" as RL
+participant "Zod Validate" as ZV
+participant "Verify Refresh\nToken MW" as VRF
+participant "Auth Controller" as AC
+participant "Auth Service" as AS
+participant "JWT Utils" as JWT
+participant "Argon2" as A2
+database "Prisma DB" as DB
+
+C -> RL: POST /v1/auth/refresh-token\n{ refreshToken }
+RL -> ZV: IP check (10/60s)
+ZV -> VRF: refreshTokenSchema validated
+VRF -> JWT: verifyRefreshToken(refreshToken)
+JWT --> VRF: { userId, email }
+VRF -> DB: findUnique({ user_id })
+DB --> VRF: { user_id, status }
+alt user not found or not active
+  VRF --> C: 401/403
+end
+VRF -> DB: findMany({ user_id, revoked:false, expires_at > now })
+DB --> VRF: stored tokens
+loop each stored token
+  VRF -> A2: verifyToken(storedHash, rawToken)
+  A2 --> VRF: true/false
+end
+alt no match found
+  VRF --> C: 403 Invalid refresh token
+end
+VRF -> AC: req.refreshPayload = decoded
+AC -> AS: refreshAccessToken(userId)
+AS -> DB: findUnique + userRole
+DB --> AS: user + roles
+AS -> JWT: sign new accessToken
+JWT --> AS: newAccessToken
+AS --> AC: newAccessToken
+AC -> C: Set httpOnly cookie accessToken\n+ JSON 200
+@enduml

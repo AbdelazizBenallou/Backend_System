@@ -1,0 +1,71 @@
+@startuml
+actor User as user
+
+participant "Server" as server
+participant "Users" as users
+participant "Profile" as profile
+participant "Role_User" as role_user
+participant "Role" as role
+participant "Role_Permission" as role_permission
+participant "Permissions" as permissions
+participant "Redis_Cache" as redis
+
+user -> server: GET /v1/users?limit=20&cursor=50\nAuthorization: Bearer <token>
+
+server -> server: extractToken(cookie or header)
+alt No Token
+    server --> user: 401 Unauthorized
+else Token Present
+
+    server -> server: jwtVerify(accessToken)
+    alt JWT Expired
+        server --> user: 401 Access token expired
+    else JWT Invalid
+        server --> user: 401 Invalid token
+    else JWT Valid
+
+        server -> server: payload = { userId, email, roles }
+        server -> users: findById(userId)
+        users --> server: { status }
+        alt Account Not Active
+            server --> user: 403 Forbidden
+        else Active
+
+            server -> redis: get(permissions:user:{userId})
+            alt Cache Miss
+                server -> role_user: getRoles(userId)
+                role_user --> server: role_ids
+                server -> role: getRoleDetails(role_ids)
+                role --> server: roles
+                server -> role_permission: getPermissions(role_ids)
+                role_permission --> server: permission_ids
+                server -> permissions: getPermissionDetails(permission_ids)
+                permissions --> server: permissions_list
+                server -> redis: set(key, permissions_list, 60)
+            end
+
+            server -> server: checkPermission("manage_users")
+            alt Forbidden
+                server --> user: 403 Forbidden
+            else Allowed
+
+                server -> server: validateQuery(cursor, limit)
+                server -> users: findManyPaginated(take:limit+1, cursor)
+                users --> server: users[]
+
+                loop each user
+                    server -> profile: getProfile(user.user_id)
+                    profile --> server: profile_data
+                    server -> role_user: getRoles(user.user_id)
+                    role_user --> server: role_ids
+                    server -> role: getRoleDetails(role_ids)
+                    role --> server: role_names
+                end
+
+                server -> server: formatUsers(users, profiles, roles)
+                server --> user: 200 OK + { data, nextCursor, hasMore }
+            end
+        end
+    end
+end
+@enduml

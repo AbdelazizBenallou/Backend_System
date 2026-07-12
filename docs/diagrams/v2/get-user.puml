@@ -1,0 +1,59 @@
+@startuml
+actor User as user
+
+participant "Server" as server
+participant "Users" as users
+participant "Profile" as profile
+participant "Role_User" as role_user
+participant "Role" as role
+participant "Role_Permission" as role_permission
+participant "Permissions" as permissions
+participant "Redis_Cache" as redis
+
+user -> server: GET /v1/users/205\nAuthorization: Bearer <token>
+
+server -> server: extractToken + jwtVerify
+alt Invalid Token
+    server --> user: 401
+else Valid
+
+    server -> users: findById(token.userId)
+    users --> server: { status }
+    alt Not Active
+        server --> user: 403
+    else Active
+
+        server -> redis: checkPermission("manage_users")
+        alt Forbidden
+            server --> user: 403
+        else Allowed
+
+            server -> server: validateIdParam(205)
+            alt Invalid ID
+                server --> user: 400 Invalid user ID
+            else Valid ID
+
+                server -> users: findById(205)
+                alt Not Found
+                    users --> server: null
+                    server --> user: 404 User not found
+                else Found
+                    users --> server: user
+
+                    server -> profile: getProfile(205)
+                    profile --> server: profile_data
+
+                    server -> role_user: getRoles(205)
+                    role_user --> server: role_ids
+
+                    server -> role: getRoleDetails(role_ids)
+                    role --> server: role_names
+
+                    server -> server: formatUser(user, profile, roles)
+                    server --> user: 200 OK + user data
+                end
+            end
+        end
+    end
+end
+@enduml

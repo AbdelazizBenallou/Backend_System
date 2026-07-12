@@ -1,0 +1,33 @@
+@startuml
+title POST /v1/auth/login
+
+actor Client as C
+participant "Rate Limiter\n(IP)" as RL1
+participant "Rate Limiter\n(Email)" as RL2
+participant "Zod Validate" as ZV
+participant "Auth Controller" as AC
+participant "Auth Service" as AS
+database "Prisma DB" as DB
+participant "Argon2" as A2
+participant "JWT Utils" as JWT
+
+C -> RL1: POST /v1/auth/login\n{ email, password }
+RL1 -> RL2: IP check (5/60s)
+RL2 -> ZV: Email check (5/300s)
+ZV -> AC: loginSchema validated
+AC -> AS: login(email, password, ip, userAgent)
+AS -> DB: findUnique({ email })
+DB --> AS: user + profile + roles
+AS -> A2: verify(password_hash, password)
+A2 --> AS: true/false
+alt invalid credentials
+  AS --> AC: throw AppError(401)
+  AC --> C: 401 Invalid credentials
+end
+AS -> JWT: signAccessToken({ userId, email, roles })
+AS -> JWT: signRefreshToken({ userId, email })
+AS -> DB: $transaction[ create refreshToken,\ncreate loginHistory ]
+DB --> AS: done
+AS --> AC: { accessToken, refreshToken, user }
+AC -> C: Set httpOnly cookies\n+ JSON response 200
+@enduml
