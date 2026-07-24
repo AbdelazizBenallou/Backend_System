@@ -11,6 +11,7 @@ import userRoutes from "./modules/users/users.routes.js";
 import { roleRoutes, permissionRoutes, userRoleRoutes } from "./modules/roles/roles.routes.js";
 import fileRoutes from "./modules/files/files.routes.js";
 
+
 const app = express();
 
 // HTTPS redirect

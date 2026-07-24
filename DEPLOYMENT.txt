@@ -1,0 +1,471 @@
+=============================================
+  BACKEND-API - COMPLETE DEPLOYMENT GUIDE
+  For Real Server Deployment
+=============================================
+
+-----------------------------------------------
+  1. SYSTEM REQUIREMENTS
+-----------------------------------------------
+  OS:             Ubuntu 22.04 / 24.04 LTS (recommended)
+  RAM:           Minimum 2GB (4GB recommended)
+  Storage:       Minimum 10GB free
+  User:          Non-root user with sudo access
+
+-----------------------------------------------
+  2. ALL SERVICES TO INSTALL
+-----------------------------------------------
+
+  SERVICE            VERSION / MINIMUM    PURPOSE
+  ─────────────────────────────────────────────────────
+  build-essential    latest               C/C++ compiler (for argon2)
+  python3            3.x                  Node-gyp build tool (for argon2 + prisma)
+  Node.js            v22.x (LTS)         Runtime
+  npm                v10.x (bundled)     Package manager
+  PostgreSQL         15.x or 16.x        Database
+  Redis              7.x                 Caching / Permission caching
+  Nginx              1.24+               Reverse proxy / X-Accel-Redirect file serving
+  PM2                5.x                 Process manager (Node.js)
+  Prisma             6.19.3              ORM (installed via npm)
+  Certbot            latest              SSL certificates (optional)
+  ClamAV             latest              Malware scanner (optional)
+
+-----------------------------------------------
+  3. INSTALL COMMANDS (Ubuntu/Debian)
+-----------------------------------------------
+
+  --- Update system ---
+  sudo apt update && sudo apt upgrade -y
+
+  --- Install build tools (REQUIRED for argon2 native module) ---
+  sudo apt install -y build-essential python3
+
+  --- Install Node.js 22.x (LTS) ---
+  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+  sudo apt install -y nodejs
+  node -v    # should show v22.x
+  npm -v     # should show 10.x
+
+  --- Install PostgreSQL 16 ---
+  sudo apt install -y postgresql postgresql-contrib
+  sudo systemctl enable postgresql
+  sudo systemctl start postgresql
+
+  --- Install Redis 7 ---
+  sudo apt install -y redis-server
+  sudo systemctl enable redis-server
+  sudo systemctl start redis-server
+  redis-cli ping   # should return PONG
+
+  --- Install Nginx ---
+  sudo apt install -y nginx
+  sudo systemctl enable nginx
+  sudo systemctl start nginx
+
+  --- Install PM2 globally ---
+  sudo npm install -g pm2
+  pm2 --version   # should show 5.x
+
+  --- (Optional) Install ClamAV malware scanner ---
+  sudo apt install -y clamav clamav-daemon
+  sudo freshclam
+  sudo systemctl enable clamav-daemon
+  sudo systemctl start clamav-daemon
+
+  --- (Optional) Install SSL tools ---
+  sudo apt install -y certbot python3-certbot-nginx
+
+-----------------------------------------------
+  4. PROJECT SETUP ON SERVER
+-----------------------------------------------
+
+  --- Clone or copy project ---
+  cd /var/www
+  sudo git clone <your-repo-url> backend-api
+  cd backend-api
+
+  --- Install dependencies (compiles argon2 native module) ---
+  npm install
+
+  --- Setup environment file ---
+  cp .env.example .env
+  nano .env    # edit with real values (see section 5)
+
+  --- Setup Prisma ---
+  npx prisma generate
+  npx prisma migrate deploy
+
+  --- Create required directories ---
+  mkdir -p logs uploads
+  # uploads subdirectories are auto-created at runtime:
+  #   uploads/avatar/
+  #   uploads/document/
+  #   uploads/video/
+  #   uploads/other/
+
+  --- Build the project ---
+  npm run build
+
+  --- Seed database (optional) ---
+  npx tsx prisma/seed.ts
+
+-----------------------------------------------
+  5. ENVIRONMENT VARIABLES (.env)
+-----------------------------------------------
+
+  # ── App ──
+  NODE_ENV=production
+  PORT=3000
+  API_URL=https://yourdomain.com
+  CORS_ORIGINS=https://yourdomain.com
+
+  # ── Database ──
+  DATABASE_URL=postgresql://backend_user:your_secure_password@localhost:5432/template
+
+  # ── Redis ──
+  REDIS_URL=redis://localhost:6379
+
+  # ── Auth (JWT) ──
+  ACCESS_SECRET=generate-a-strong-random-string
+  REFRESH_SECRET=generate-another-strong-random-string
+  ACCESS_EXPIRY=60m
+  REFRESH_EXPIRY=7d
+
+  # ── File upload ──
+  UPLOAD_DIR=/var/www/backend-api/uploads
+  UPLOAD_MAX_FILE_SIZE=10485760
+  UPLOAD_MAX_AVATAR_SIZE=2097152
+  UPLOAD_MAX_VIDEO_SIZE=209715200
+  UPLOAD_MAX_BATCH_SIZE=20971520
+  MALWARE_SCANNER_ENABLED=false
+
+  To generate secrets, run:
+    openssl rand -hex 32
+
+  ** SECURITY: After deployment, delete .env from the repo directory
+     and keep it ONLY on the server. Never commit .env to git. **
+
+-----------------------------------------------
+  6. POSTGRESQL DATABASE SETUP
+-----------------------------------------------
+
+  sudo -u postgres psql
+
+  Inside psql shell:
+    CREATE USER backend_user WITH PASSWORD 'your_secure_password';
+    CREATE DATABASE template OWNER backend_user;
+    GRANT ALL PRIVILEGES ON DATABASE template TO backend_user;
+    \q
+
+  Then update DATABASE_URL in .env with your credentials.
+
+  To verify connection:
+    psql -U backend_user -d template -h localhost
+
+  IMPORTANT: Do NOT use the old DB/init/init.sql file.
+     It has a different schema and will conflict with Prisma.
+     Use ONLY "npx prisma migrate deploy" for database setup.
+
+-----------------------------------------------
+  7. REDIS SETUP
+-----------------------------------------------
+
+  Default config works out of the box (no password).
+
+  For production, set a password:
+    sudo nano /etc/redis/redis.conf
+    # Uncomment and set: requirepass your_redis_password
+
+  Then restart Redis:
+    sudo systemctl restart redis-server
+
+  Update REDIS_URL in .env:
+    redis://:your_redis_password@localhost:6379
+
+  Verify:
+    redis-cli ping    # PONG
+    redis-cli info server
+
+-----------------------------------------------
+  8. NGINX SETUP
+-----------------------------------------------
+
+  --- Copy nginx config ---
+  sudo cp /var/www/backend-api/scripts/nginx.conf /etc/nginx/sites-available/backend-api
+  sudo ln -sf /etc/nginx/sites-available/backend-api /etc/nginx/sites-enabled/backend-api
+  sudo rm -f /etc/nginx/sites-enabled/default
+
+  --- Edit server_name ---
+  sudo nano /etc/nginx/sites-available/backend-api
+  # Change: server_name _;  -->  server_name yourdomain.com;
+
+  --- Ensure uploads directory is readable by nginx ---
+  sudo chmod -R 755 /var/www/backend-api/uploads
+
+  --- Test and reload ---
+  sudo nginx -t
+  sudo systemctl reload nginx
+
+-----------------------------------------------
+  9. PM2 START APPLICATION
+-----------------------------------------------
+
+  cd /var/www/backend-api
+
+  --- IMPORTANT: Fix PM2 script path first ---
+  The ecosystem.config.cjs has script: "dist/index.js"
+  but the correct entry point is: "dist/src/index.js"
+  Edit ecosystem.config.cjs if needed before starting.
+
+  --- Start in production ---
+  pm2 start ecosystem.config.cjs --env production
+
+  --- Save PM2 process list (auto-start on reboot) ---
+  pm2 save
+  pm2 startup
+  # Follow the command it outputs
+
+  --- Useful PM2 commands ---
+  pm2 list                # list all apps
+  pm2 logs backend-api    # view logs
+  pm2 restart backend-api # restart app
+  pm2 stop backend-api    # stop app
+  pm2 delete backend-api  # remove app
+  pm2 monit               # real-time monitoring
+
+-----------------------------------------------
+  10. SECURITY HARDENING
+-----------------------------------------------
+
+  --- Firewall ---
+  sudo apt install -y ufw
+  sudo ufw allow OpenSSH
+  sudo ufw allow 'Nginx Full'
+  sudo ufw enable
+  sudo ufw status
+
+  --- Change default admin credentials ---
+  Default login: admin@email.com / Admin@12345
+  Change this immediately after first login!
+
+  --- Rotate JWT secrets ---
+  Generate new secrets and update .env:
+    openssl rand -hex 32
+
+  --- Ports that should be open externally ---
+  80   - HTTP (Nginx)
+  443  - HTTPS (Nginx + SSL)
+  22   - SSH
+
+  --- Ports that should be LOCALHOST ONLY ---
+  3000  - Node.js (behind Nginx)
+  5432  - PostgreSQL
+  6379  - Redis
+
+-----------------------------------------------
+  11. SSL CERTIFICATE (Let's Encrypt)
+-----------------------------------------------
+
+  sudo certbot --nginx -d yourdomain.com
+  # Follow the prompts
+
+  Auto-renewal test:
+  sudo certbot renew --dry-run
+
+-----------------------------------------------
+  12. DATABASE BACKUP (Optional)
+-----------------------------------------------
+
+  The project has a backup script at: DB/backup.sh
+  NOTE: This script uses Docker (docker exec) to run pg_dump.
+  If PostgreSQL runs natively (not in Docker), modify the script first.
+
+  To set up daily backups at 2 AM:
+    crontab -e
+    0 2 * * * /var/www/backend-api/DB/backup.sh
+
+  For native PostgreSQL, replace the docker exec line with:
+    pg_dump -U backend_user -h localhost template > "$BACKUP_DIR/$DUMP_FILE"
+
+-----------------------------------------------
+  13. CRITICAL BUGS TO FIX BEFORE DEPLOYMENT
+-----------------------------------------------
+
+  BUG #1: REDIS_URL missing from env schema
+  ─────────────────────────────────────────
+  File: framework/config/env.ts
+  The env schema does NOT define REDIS_URL, but framework/config/redis.ts
+  references env.REDIS_URL. If Redis is connected, env validation fails.
+
+  FIX: Add to env.ts schema:
+    REDIS_URL: z.string().default("redis://localhost:6379")
+
+  BUG #2: Redis is never connected
+  ─────────────────────────────────
+  File: src/index.ts
+  connectRedis() is never called. The checkPermission middleware uses
+  Redis cache directly, which will CRASH on any permission-checked route.
+
+  FIX: Add to src/index.ts before the server starts:
+    import { connectRedis } from "../framework/config/redis.js";
+    await connectRedis();
+
+  BUG #3: PM2 script path may be wrong
+  ─────────────────────────────────────
+  File: ecosystem.config.cjs
+  Current: script: "dist/index.js"
+  Correct: script: "dist/src/index.js"  (because rootDir = "." and source is src/)
+
+  FIX: Update ecosystem.config.cjs line 6 to:
+    script: "dist/src/index.js"
+
+  BUG #4: Rate limiter is in-memory only
+  ──────────────────────────────────────
+  File: framework/middleware/rateLimiter.ts
+  Uses RateLimiterMemory. If PM2 runs multiple instances, rate limits
+  are NOT shared. For production, consider using Redis-based rate limiting.
+
+  BUG #5: Backup script assumes Docker
+  ─────────────────────────────────────
+  File: DB/backup.sh
+  Uses "docker exec" to run pg_dump inside a container.
+  If PostgreSQL runs natively, the backup will fail.
+
+-----------------------------------------------
+  14. COMPLETE ONE-SHOT INSTALLATION SCRIPT
+-----------------------------------------------
+
+  Copy and run this on a fresh Ubuntu server:
+
+  #!/bin/bash
+  set -e
+
+  echo "=== Updating system ==="
+  sudo apt update && sudo apt upgrade -y
+
+  echo "=== Installing build tools ==="
+  sudo apt install -y build-essential python3
+
+  echo "=== Installing Node.js 22.x ==="
+  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+  sudo apt install -y nodejs
+
+  echo "=== Installing PostgreSQL ==="
+  sudo apt install -y postgresql postgresql-contrib
+  sudo systemctl enable postgresql
+  sudo systemctl start postgresql
+
+  echo "=== Installing Redis ==="
+  sudo apt install -y redis-server
+  sudo systemctl enable redis-server
+  sudo systemctl start redis-server
+
+  echo "=== Installing Nginx ==="
+  sudo apt install -y nginx
+  sudo systemctl enable nginx
+  sudo systemctl start nginx
+
+  echo "=== Installing PM2 ==="
+  sudo npm install -g pm2
+
+  echo "=== Installing Firewall & SSL ==="
+  sudo apt install -y ufw certbot python3-certbot-nginx
+  sudo ufw allow OpenSSH
+  sudo ufw allow 'Nginx Full'
+  sudo ufw --force enable
+
+  echo "=== Setting up PostgreSQL user and database ==="
+  sudo -u postgres psql -c "CREATE USER backend_user WITH PASSWORD 'CHANGE_ME';"
+  sudo -u postgres psql -c "CREATE DATABASE template OWNER backend_user;"
+  sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE template TO backend_user;"
+
+  echo ""
+  echo "============================================="
+  echo "  INSTALLED VERSIONS"
+  echo "============================================="
+  echo "Node.js:       $(node -v)"
+  echo "npm:           $(npm -v)"
+  echo "PostgreSQL:    $(psql --version)"
+  echo "Redis:         $(redis-cli --version)"
+  echo "Nginx:         $(nginx -v 2>&1)"
+  echo "PM2:           $(pm2 --version)"
+  echo ""
+  echo "Next steps:"
+  echo "1. cd /var/www && git clone <your-repo> backend-api"
+  echo "2. cd backend-api && npm install"
+  echo "3. cp .env.example .env && nano .env"
+  echo "4. npx prisma generate && npx prisma migrate deploy"
+  echo "5. mkdir -p logs uploads"
+  echo "6. npm run build"
+  echo "7. Fix ecosystem.config.cjs (script: dist/src/index.js)"
+  echo "8. Fix framework/config/env.ts (add REDIS_URL)"
+  echo "9. Fix src/index.ts (add connectRedis())"
+  echo "10. Setup nginx config"
+  echo "11. pm2 start ecosystem.config.cjs --env production"
+  echo "12. pm2 save && pm2 startup"
+  echo "============================================="
+
+-----------------------------------------------
+  15. FULL DIRECTORY PERMISSIONS MAP
+-----------------------------------------------
+
+  /var/www/backend-api/           755  (readable by all, writable by owner)
+  /var/www/backend-api/logs/      755  (PM2 writes logs here)
+  /var/www/backend-api/uploads/   755  (Node.js process writes, Nginx reads)
+  /var/www/backend-api/uploads/avatar/     755
+  /var/www/backend-api/uploads/document/   755
+  /var/www/backend-api/uploads/video/      755
+  /var/www/backend-api/uploads/other/      755
+  /var/www/backend-api/dist/      755  (compiled output)
+
+  The Node.js process user must own these directories:
+    sudo chown -R $USER:$USER /var/www/backend-api
+
+  Nginx worker needs read access to uploads/ for X-Accel-Redirect.
+
+=============================================
+  COMPLETE SUMMARY
+=============================================
+
+  SYSTEM PACKAGES:
+    build-essential       latest          (required for argon2)
+    python3               3.x             (required for argon2 + prisma)
+    Node.js               22.x LTS        runtime
+    npm                   10.x            package manager
+    PostgreSQL            15.x / 16.x     database
+    Redis                 7.x             caching
+    Nginx                 1.24+           reverse proxy
+    PM2                   5.x             process manager
+    ClamAV                latest          (optional: malware scanning)
+    Certbot               latest          (optional: SSL)
+
+  NPM PACKAGES (production):
+    @prisma/client        ^6.19.3
+    argon2                ^0.44.0
+    cookie-parser         ^1.4.7
+    cors                  ^2.8.6
+    dotenv                ^17.4.2
+    express               ^5.2.1
+    jsonwebtoken          ^9.0.3
+    multer                ^1.4.5-lts.2
+    pdfkit                ^0.19.1
+    pino                  ^10.3.1
+    pino-pretty           ^13.1.3
+    rate-limiter-flexible  ^11.2.0
+    redis                 ^6.0.0
+    swagger-jsdoc         ^6.3.0
+    swagger-ui-express    ^5.0.1
+    uuid                  ^11.1.0
+    zod                   ^4.4.3
+
+  PORTS:
+    80     HTTP (external)      - Nginx
+    443    HTTPS (external)     - Nginx + SSL
+    3000   Node.js (localhost)  - Express app
+    5432   PostgreSQL (local)   - Database
+    6379   Redis (localhost)    - Cache
+
+  FILES TO EDIT BEFORE DEPLOY:
+    1. .env                              - production values
+    2. ecosystem.config.cjs              - fix script path
+    3. framework/config/env.ts           - add REDIS_URL
+    4. src/index.ts                      - add connectRedis()
