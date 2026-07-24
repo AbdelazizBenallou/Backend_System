@@ -13,9 +13,60 @@ jobs:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1
         with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          host: 83.229.87.99
+          username: micro14
+          key: |
+            -----BEGIN RSA PRIVATE KEY-----
+            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
+            -----END RSA PRIVATE KEY-----
           script: |
             cd /var/www/Backend_System
 
@@ -23,16 +74,20 @@ jobs:
             git pull origin main
 
             echo "=== Installing dependencies ==="
-            npm install --production=false
+            npm install
 
             echo "=== Running Prisma migrations ==="
             npx prisma generate
             npx prisma migrate deploy
+
+            echo "=== Creating directories ==="
+            mkdir -p logs uploads
 
             echo "=== Building project ==="
             npm run build
 
             echo "=== Restarting PM2 ==="
             pm2 restart backend-api || pm2 start ecosystem.config.cjs --env production
+            pm2 save
 
             echo "=== Deploy complete ==="
