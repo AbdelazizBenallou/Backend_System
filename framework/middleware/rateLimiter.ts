@@ -3,7 +3,7 @@ import { RateLimiterMemory } from "rate-limiter-flexible";
 
 const rateLimit = (limiter: RateLimiterMemory) =>
   (req: Request, res: Response, next: NextFunction): void => {
-    limiter.consume(req.ip)
+    limiter.consume(req.ip ?? "unknown")
       .then(() => next())
       .catch(() => {
         res.status(429).json({

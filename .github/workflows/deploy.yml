@@ -1,0 +1,38 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    name: Deploy to Server
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd /var/www/Backend_System
+
+            echo "=== Pulling latest changes ==="
+            git pull origin main
+
+            echo "=== Installing dependencies ==="
+            npm install --production=false
+
+            echo "=== Running Prisma migrations ==="
+            npx prisma generate
+            npx prisma migrate deploy
+
+            echo "=== Building project ==="
+            npm run build
+
+            echo "=== Restarting PM2 ==="
+            pm2 restart backend-api || pm2 start ecosystem.config.cjs --env production
+
+            echo "=== Deploy complete ==="
